@@ -5,7 +5,7 @@ import copy
 import warnings
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
 import gym
 import numpy as np
@@ -33,8 +33,10 @@ from stable_baselines3.common.torch_layers import (
 from stable_baselines3.common.type_aliases import Schedule
 from stable_baselines3.common.utils import get_device, is_vectorized_observation, obs_as_tensor
 
+BaseModelSelf = TypeVar("BaseModelSelf", bound="BaseModel")
 
-class BaseModel(nn.Module, ABC):
+
+class BaseModel(nn.Module):
     """
     The base model object: makes predictions in response to observations.
 
@@ -86,10 +88,6 @@ class BaseModel(nn.Module, ABC):
 
         self.features_extractor_class = features_extractor_class
         self.features_extractor_kwargs = features_extractor_kwargs
-
-    @abstractmethod
-    def forward(self, *args, **kwargs):
-        pass
 
     def _update_features_extractor(
         self,
@@ -162,7 +160,7 @@ class BaseModel(nn.Module, ABC):
         th.save({"state_dict": self.state_dict(), "data": self._get_constructor_parameters()}, path)
 
     @classmethod
-    def load(cls, path: str, device: Union[th.device, str] = "auto") -> "BaseModel":
+    def load(cls: Type[BaseModelSelf], path: str, device: Union[th.device, str] = "auto") -> BaseModelSelf:
         """
         Load model from path.
 
@@ -255,7 +253,7 @@ class BaseModel(nn.Module, ABC):
         return observation, vectorized_env
 
 
-class BasePolicy(BaseModel):
+class BasePolicy(BaseModel, ABC):
     """The base policy object.
 
     Parameters are mostly the same as `BaseModel`; additions are documented below.
@@ -336,8 +334,8 @@ class BasePolicy(BaseModel):
 
         with th.no_grad():
             actions = self._predict(observation, deterministic=deterministic)
-        # Convert to numpy
-        actions = actions.cpu().numpy()
+        # Convert to numpy, and reshape to the original action shape
+        actions = actions.cpu().numpy().reshape((-1,) + self.action_space.shape)
 
         if isinstance(self.action_space, gym.spaces.Box):
             if self.squash_output:
@@ -350,7 +348,7 @@ class BasePolicy(BaseModel):
 
         # Remove batch dimension if needed
         if not vectorized_env:
-            actions = actions[0]
+            actions = actions.squeeze(axis=0)
 
         return actions, state
 
@@ -592,6 +590,7 @@ class ActorCriticPolicy(BasePolicy):
         distribution = self._get_action_dist_from_latent(latent_pi)
         actions = distribution.get_actions(deterministic=deterministic)
         log_prob = distribution.log_prob(actions)
+        actions = actions.reshape((-1,) + self.action_space.shape)
         return actions, values, log_prob
 
     def _get_action_dist_from_latent(self, latent_pi: th.Tensor) -> Distribution:

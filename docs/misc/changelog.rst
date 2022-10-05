@@ -3,21 +3,83 @@
 Changelog
 ==========
 
-
-Release 1.5.1a6 (WIP)
+Release 1.6.1 (2022-09-29)
 ---------------------------
+
+**Bug fix release**
+
+Breaking Changes:
+^^^^^^^^^^^^^^^^^
+- Switched minimum tensorboard version to 2.9.1
+
+New Features:
+^^^^^^^^^^^^^
+- Support logging hyperparameters to tensorboard (@timothe-chaumont)
+- Added checkpoints for replay buffer and ``VecNormalize`` statistics (@anand-bala)
+- Added option for ``Monitor`` to append to existing file instead of overriding (@sidney-tio)
+- The env checker now raises an error when using dict observation spaces and observation keys don't match observation space keys
+
+SB3-Contrib
+^^^^^^^^^^^
+- Fixed the issue of wrongly passing policy arguments when using ``CnnLstmPolicy`` or ``MultiInputLstmPolicy`` with ``RecurrentPPO`` (@mlodel)
+
+Bug Fixes:
+^^^^^^^^^^
+- Fixed issue where ``PPO`` gives NaN if rollout buffer provides a batch of size 1 (@hughperkins)
+- Fixed the issue that ``predict`` does not always return action as ``np.ndarray`` (@qgallouedec)
+- Fixed division by zero error when computing FPS when a small number of time has elapsed in operating systems with low-precision timers.
+- Added multidimensional action space support (@qgallouedec)
+- Fixed missing verbose parameter passing in the ``EvalCallback`` constructor (@burakdmb)
+- Fixed the issue that when updating the target network in DQN, SAC, TD3, the ``running_mean`` and ``running_var`` properties of batch norm layers are not updated (@honglu2875)
+- Fixed incorrect type annotation of the replay_buffer_class argument in ``common.OffPolicyAlgorithm`` initializer, where an instance instead of a class was required (@Rocamonde)
+- Fixed loading saved model with different number of envrionments
+- Removed ``forward()`` abstract method declaration from ``common.policies.BaseModel`` (already defined in ``torch.nn.Module``) to fix type errors in subclasses (@Rocamonde)
+- Fixed the return type of ``.load()`` and ``.learn()`` methods in ``BaseAlgorithm`` so that they now use ``TypeVar`` (@Rocamonde)
+- Fixed an issue where keys with different tags but the same key raised an error in ``common.logger.HumanOutputFormat`` (@Rocamonde and @AdamGleave)
+- Set importlib-metadata version to `~=4.13`
+
+Deprecations:
+^^^^^^^^^^^^^
+
+Others:
+^^^^^^^
+- Fixed ``DictReplayBuffer.next_observations`` typing (@qgallouedec)
+- Added support for ``device="auto"`` in buffers and made it default (@qgallouedec)
+- Updated ``ResultsWriter` (used internally by ``Monitor`` wrapper) to automatically create missing directories when ``filename`` is a path (@dominicgkerr)
+
+Documentation:
+^^^^^^^^^^^^^^
+- Added an example of callback that logs hyperparameters to tensorboard. (@timothe-chaumont)
+- Fixed typo in docstring "nature" -> "Nature" (@Melanol)
+- Added info on split tensorboard logs into (@Melanol)
+- Fixed typo in ppo doc (@francescoluciano)
+- Fixed typo in install doc(@jlp-ue)
+- Clarified and standardized verbosity documentation
+- Added link to a GitHub issue in the custom policy documentation (@AlexPasqua)
+- Update doc on exporting models (fixes and added torch jit)
+- Fixed typos (@Akhilez)
+- Standardized the use of ``"`` for string representation in documentation
+
+Release 1.6.0 (2022-07-11)
+---------------------------
+
+**Recurrent PPO (PPO LSTM), better defaults for learning from pixels with SAC/TD3**
 
 Breaking Changes:
 ^^^^^^^^^^^^^^^^^
 - Changed the way policy "aliases" are handled ("MlpPolicy", "CnnPolicy", ...), removing the former
   ``register_policy`` helper, ``policy_base`` parameter and using ``policy_aliases`` static attributes instead (@Gregwar)
 - SB3 now requires PyTorch >= 1.11
+- Changed the default network architecture when using ``CnnPolicy`` or ``MultiInputPolicy`` with SAC or DDPG/TD3,
+  ``share_features_extractor`` is now set to False by default and the ``net_arch=[256, 256]`` (instead of ``net_arch=[]`` that was before)
 
 New Features:
 ^^^^^^^^^^^^^
 
 SB3-Contrib
 ^^^^^^^^^^^
+- Added Recurrent PPO (PPO LSTM). See https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/pull/53
+
 
 Bug Fixes:
 ^^^^^^^^^^
@@ -26,6 +88,11 @@ Bug Fixes:
 - Fixed a bug with special characters in the tensorboard log name (@quantitative-technologies)
 - Fixed a bug in ``DummyVecEnv``'s and ``SubprocVecEnv``'s seeding function. None value was unchecked (@ScheiklP)
 - Fixed a bug where ``EvalCallback`` would crash when trying to synchronize ``VecNormalize`` stats when observation normalization was disabled
+- Added a check for unbounded actions
+- Fixed issues due to newer version of protobuf (tensorboard) and sphinx
+- Fix exception causes all over the codebase (@cool-RR)
+- Prohibit simultaneous use of optimize_memory_usage and handle_timeout_termination due to a bug (@MWeltevrede)
+- Fixed a bug in ``kl_divergence`` check that would fail when using numpy arrays with MultiCategorical distribution
 
 Deprecations:
 ^^^^^^^^^^^^^
@@ -42,6 +109,9 @@ Documentation:
 - Added link to PPO ICLR blog post
 - Added remark about breaking Markov assumption and timeout handling
 - Added doc about MLFlow integration via custom logger (@git-thor)
+- Updated Huggingface integration doc
+- Added copy button for code snippets
+- Added doc about EnvPool and Isaac Gym support
 
 
 Release 1.5.0 (2022-03-25)
@@ -937,7 +1007,8 @@ Maintainers
 -----------
 
 Stable-Baselines3 is currently maintained by `Antonin Raffin`_ (aka `@araffin`_), `Ashley Hill`_ (aka @hill-a),
-`Maximilian Ernestus`_ (aka @ernestum), `Adam Gleave`_ (`@AdamGleave`_) and `Anssi Kanervisto`_ (aka `@Miffyli`_).
+`Maximilian Ernestus`_ (aka @ernestum), `Adam Gleave`_ (`@AdamGleave`_), `Anssi Kanervisto`_ (aka `@Miffyli`_)
+and `Quentin Gallouédec`_ (aka @qgallouedec).
 
 .. _Ashley Hill: https://github.com/hill-a
 .. _Antonin Raffin: https://araffin.github.io/
@@ -947,6 +1018,8 @@ Stable-Baselines3 is currently maintained by `Antonin Raffin`_ (aka `@araffin`_)
 .. _@AdamGleave: https://github.com/adamgleave
 .. _Anssi Kanervisto: https://github.com/Miffyli
 .. _@Miffyli: https://github.com/Miffyli
+.. _Quentin Gallouédec: https://gallouedec.com/
+.. _@qgallouedec: https://github.com/qgallouedec
 
 
 
@@ -971,4 +1044,6 @@ And all the contributors:
 @wkirgsn @AechPro @CUN-bjy @batu @IljaAvadiev @timokau @kachayev @cleversonahum
 @eleurent @ac-93 @cove9988 @theDebugger811 @hsuehch @Demetrio92 @thomasgubler @IperGiove @ScheiklP
 @simoninithomas @armandpl @manuel-delverme @Gautam-J @gianlucadecola @buoyancy99 @caburu @xy9485
-@Gregwar @ycheng517 @quantitative-technologies @bcollazo @git-thor @TibiGG
+@Gregwar @ycheng517 @quantitative-technologies @bcollazo @git-thor @TibiGG @cool-RR @MWeltevrede
+@Melanol @qgallouedec @francescoluciano @jlp-ue @burakdmb @timothe-chaumont @honglu2875
+@anand-bala @hughperkins @sidney-tio @AlexPasqua @dominicgkerr @Akhilez @Rocamonde
