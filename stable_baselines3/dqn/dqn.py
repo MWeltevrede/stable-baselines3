@@ -47,15 +47,12 @@ class DQN(OffPolicyAlgorithm):
         See https://github.com/DLR-RM/stable-baselines3/issues/37#issuecomment-637501195
     :param target_update_interval: update the target network every ``target_update_interval``
         environment steps.
+    :param double_q: whether to use double dqn
     :param exploration_fraction: fraction of entire training period over which the exploration rate is reduced
     :param exploration_initial_eps: initial value of random action probability
     :param exploration_final_eps: final value of random action probability
     :param max_grad_norm: The maximum value for the gradient clipping
     :param tensorboard_log: the log location for tensorboard (if None, no logging)
-    :param create_eval_env: Whether to create a second environment that will be
-        used for evaluating the agent periodically (Only available when passing string for the environment).
-        Caution, this parameter is deprecated and will be removed in the future.
-        Please use `EvalCallback` or a custom Callback instead.
     :param policy_kwargs: additional arguments to be passed to the policy on creation
     :param verbose: Verbosity level: 0 for no output, 1 for info messages (such as device or wrappers used), 2 for
         debug messages
@@ -87,12 +84,12 @@ class DQN(OffPolicyAlgorithm):
         replay_buffer_kwargs: Optional[Dict[str, Any]] = None,
         optimize_memory_usage: bool = False,
         target_update_interval: int = 10000,
+        double_q: bool = False,
         exploration_fraction: float = 0.1,
         exploration_initial_eps: float = 1.0,
         exploration_final_eps: float = 0.05,
         max_grad_norm: float = 10,
         tensorboard_log: Optional[str] = None,
-        create_eval_env: bool = False,
         policy_kwargs: Optional[Dict[str, Any]] = None,
         verbose: int = 0,
         seed: Optional[int] = None,
@@ -118,7 +115,6 @@ class DQN(OffPolicyAlgorithm):
             tensorboard_log=tensorboard_log,
             verbose=verbose,
             device=device,
-            create_eval_env=create_eval_env,
             seed=seed,
             sde_support=False,
             optimize_memory_usage=optimize_memory_usage,
@@ -130,6 +126,7 @@ class DQN(OffPolicyAlgorithm):
         self.exploration_final_eps = exploration_final_eps
         self.exploration_fraction = exploration_fraction
         self.target_update_interval = target_update_interval
+        self.double_q = double_q
         # For updating the target network with multiple envs:
         self._n_calls = 0
         self.max_grad_norm = max_grad_norm
@@ -198,10 +195,17 @@ class DQN(OffPolicyAlgorithm):
             with th.no_grad():
                 # Compute the next Q-values using the target network
                 next_q_values = self.q_net_target(replay_data.next_observations)
-                # Follow greedy policy: use the one with the highest value
-                next_q_values, _ = next_q_values.max(dim=1)
-                # Avoid potential broadcast issue
-                next_q_values = next_q_values.reshape(-1, 1)
+                if self.double_q:
+                    # Compute the next Q-values using the current network
+                    next_q_values_current = self.q_net(replay_data.next_observations)
+                    # Determine argmax based on the current network values
+                    actions = next_q_values_current.max(dim=1)[1].unsqueeze(dim=-1)
+                    next_q_values = next_q_values.gather(dim=1, index=actions)
+                else:
+                    # Follow greedy policy: use the one with the highest value
+                    next_q_values, _ = next_q_values.max(dim=1)
+                    # Avoid potential broadcast issue
+                    next_q_values = next_q_values.reshape(-1, 1)
                 # 1-step TD target
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
@@ -263,11 +267,7 @@ class DQN(OffPolicyAlgorithm):
         total_timesteps: int,
         callback: MaybeCallback = None,
         log_interval: int = 4,
-        eval_env: Optional[GymEnv] = None,
-        eval_freq: int = -1,
-        n_eval_episodes: int = 5,
         tb_log_name: str = "DQN",
-        eval_log_path: Optional[str] = None,
         reset_num_timesteps: bool = True,
         progress_bar: bool = False,
     ) -> DQNSelf:
@@ -276,11 +276,7 @@ class DQN(OffPolicyAlgorithm):
             total_timesteps=total_timesteps,
             callback=callback,
             log_interval=log_interval,
-            eval_env=eval_env,
-            eval_freq=eval_freq,
-            n_eval_episodes=n_eval_episodes,
             tb_log_name=tb_log_name,
-            eval_log_path=eval_log_path,
             reset_num_timesteps=reset_num_timesteps,
             progress_bar=progress_bar,
         )
