@@ -77,9 +77,10 @@ class DummyVecEnv(VecEnv):
             env.close()
 
     def get_images(self) -> Sequence[np.ndarray]:
-        return [env.render(mode="rgb_array") for env in self.envs]
+        # return [env.render(mode="rgb_array") for env in self.envs]
+        return [env.render() for env in self.envs]
 
-    def render(self, mode: str = "human") -> Optional[np.ndarray]:
+    def render(self, mode: str = "rgb_array") -> Optional[np.ndarray]:
         """
         Gym environment rendering. If there are multiple environments then
         they are tiled together in one image via ``BaseVecEnv.render()``.
