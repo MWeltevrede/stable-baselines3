@@ -101,8 +101,11 @@ class DQN(OffPolicyAlgorithm):
         verbose: int = 0,
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
+        use_amp: bool = False,
         _init_setup_model: bool = True,
     ) -> None:
+        policy_kwargs['use_amp'] = use_amp
+
         super().__init__(
             policy,
             env,
@@ -139,6 +142,9 @@ class DQN(OffPolicyAlgorithm):
         self.max_grad_norm = max_grad_norm
         # "epsilon" for the epsilon-greedy exploration
         self.exploration_rate = 0.0
+
+        self.use_amp = use_amp
+        self.scaler = th.cuda.amp.GradScaler(enabled=self.use_amp)
 
         if _init_setup_model:
             self._setup_model()
@@ -195,39 +201,48 @@ class DQN(OffPolicyAlgorithm):
             # Sample replay buffer
             replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)  # type: ignore[union-attr]
 
-            with th.no_grad():
-                # Compute the next Q-values using the target network
-                next_q_values = self.q_net_target(replay_data.next_observations)
-                if self.double_q:
-                    # Compute the next Q-values using the current network
-                    next_q_values_current = self.q_net(replay_data.next_observations)
-                    # Determine argmax based on the current network values
-                    actions = next_q_values_current.max(dim=1)[1].unsqueeze(dim=-1)
-                    next_q_values = next_q_values.gather(dim=1, index=actions)
-                else:
-                    # Follow greedy policy: use the one with the highest value
-                    next_q_values, _ = next_q_values.max(dim=1)
-                    # Avoid potential broadcast issue
-                    next_q_values = next_q_values.reshape(-1, 1)
-                # 1-step TD target
-                target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
+            with th.autocast(device_type=self.device.type, dtype=th.float16, enabled=self.use_amp):
+                with th.no_grad():
+                    # Compute the next Q-values using the target network
+                    next_q_values = self.q_net_target(replay_data.next_observations)
+                    if self.double_q:
+                        # Compute the next Q-values using the current network
+                        next_q_values_current = self.q_net(replay_data.next_observations)
+                        # Determine argmax based on the current network values
+                        actions = next_q_values_current.max(dim=1)[1].unsqueeze(dim=-1)
+                        next_q_values = next_q_values.gather(dim=1, index=actions)
+                    else:
+                        # Follow greedy policy: use the one with the highest value
+                        next_q_values, _ = next_q_values.max(dim=1)
+                        # Avoid potential broadcast issue
+                        next_q_values = next_q_values.reshape(-1, 1)
+                    # 1-step TD target
+                    target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
-            # Get current Q-values estimates
-            current_q_values = self.q_net(replay_data.observations)
+            with th.autocast(device_type=self.device.type, dtype=th.float16, enabled=self.use_amp):
+                # Get current Q-values estimates
+                current_q_values = self.q_net(replay_data.observations)
 
-            # Retrieve the q-values for the actions from the replay buffer
-            current_q_values = th.gather(current_q_values, dim=1, index=replay_data.actions.long())
+                # Retrieve the q-values for the actions from the replay buffer
+                current_q_values = th.gather(current_q_values, dim=1, index=replay_data.actions.long())
 
-            # Compute Huber loss (less sensitive to outliers)
-            loss = F.smooth_l1_loss(current_q_values, target_q_values)
-            losses.append(loss.item())
+                # Compute Huber loss (less sensitive to outliers)
+                loss = F.smooth_l1_loss(current_q_values, target_q_values)
+
+        
 
             # Optimize the policy
+            # self.policy.optimizer.zero_grad(set_to_none=True)
             self.policy.optimizer.zero_grad()
-            loss.backward()
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.policy.optimizer)
+            # loss.backward()
             # Clip gradient norm
             th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-            self.policy.optimizer.step()
+            # self.policy.optimizer.step()
+            self.scaler.step(self.policy.optimizer)
+            self.scaler.update()
+            losses.append(loss.item())
 
         # Increase update counter
         self._n_updates += gradient_steps

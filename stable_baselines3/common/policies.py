@@ -288,9 +288,10 @@ class BasePolicy(BaseModel, ABC):
 
     features_extractor: BaseFeaturesExtractor
 
-    def __init__(self, *args, squash_output: bool = False, **kwargs):
+    def __init__(self, *args, squash_output: bool = False, use_amp: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self._squash_output = squash_output
+        self.use_amp = use_amp
 
     @staticmethod
     def _dummy_schedule(progress_remaining: float) -> float:
@@ -362,8 +363,9 @@ class BasePolicy(BaseModel, ABC):
 
         obs_tensor, vectorized_env = self.obs_to_tensor(observation)
 
-        with th.no_grad():
-            actions = self._predict(obs_tensor, deterministic=deterministic)
+        with th.autocast(device_type=self.device.type, dtype=th.float16, enabled=self.use_amp):
+            with th.no_grad():
+                actions = self._predict(obs_tensor, deterministic=deterministic)
         # Convert to numpy, and reshape to the original action shape
         actions = actions.cpu().numpy().reshape((-1, *self.action_space.shape))  # type: ignore[misc]
 

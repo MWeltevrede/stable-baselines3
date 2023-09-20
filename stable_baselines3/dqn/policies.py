@@ -38,12 +38,14 @@ class QNetwork(BasePolicy):
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
         normalize_images: bool = True,
+        use_amp: bool = False,
     ) -> None:
         super().__init__(
             observation_space,
             action_space,
             features_extractor=features_extractor,
             normalize_images=normalize_images,
+            use_amp=use_amp
         )
 
         if net_arch is None:
@@ -120,6 +122,7 @@ class DQNPolicy(BasePolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        use_amp: bool = False,
     ) -> None:
         super().__init__(
             observation_space,
@@ -129,6 +132,7 @@ class DQNPolicy(BasePolicy):
             optimizer_class=optimizer_class,
             optimizer_kwargs=optimizer_kwargs,
             normalize_images=normalize_images,
+            use_amp=use_amp,
         )
 
         if net_arch is None:
@@ -175,7 +179,7 @@ class DQNPolicy(BasePolicy):
     def make_q_net(self) -> QNetwork:
         # Make sure we always have separate networks for features extractors etc
         net_args = self._update_features_extractor(self.net_args, features_extractor=None)
-        return QNetwork(**net_args).to(self.device)
+        return QNetwork(use_amp=self.use_amp, **net_args).to(self.device)
 
     def forward(self, obs: PyTorchObs, deterministic: bool = True) -> th.Tensor:
         return self._predict(obs, deterministic=deterministic)
@@ -244,6 +248,7 @@ class CnnPolicy(DQNPolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        use_amp: bool = False,
     ) -> None:
         super().__init__(
             observation_space,
@@ -256,6 +261,7 @@ class CnnPolicy(DQNPolicy):
             normalize_images,
             optimizer_class,
             optimizer_kwargs,
+            use_amp=use_amp,
         )
 
 
@@ -289,6 +295,7 @@ class MultiInputPolicy(DQNPolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        use_amp: bool = False,
     ) -> None:
         super().__init__(
             observation_space,
@@ -301,4 +308,5 @@ class MultiInputPolicy(DQNPolicy):
             normalize_images,
             optimizer_class,
             optimizer_kwargs,
+            use_amp=use_amp,
         )
