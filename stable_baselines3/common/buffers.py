@@ -200,13 +200,6 @@ class ReplayBuffer(BaseBuffer):
         if psutil is not None:
             mem_available = psutil.virtual_memory().available
 
-        # there is a bug if both optimize_memory_usage and handle_timeout_termination are true
-        # see https://github.com/DLR-RM/stable-baselines3/issues/934
-        if optimize_memory_usage and handle_timeout_termination:
-            raise ValueError(
-                "ReplayBuffer does not support optimize_memory_usage = True "
-                "and handle_timeout_termination = True simultaneously."
-            )
         self.optimize_memory_usage = optimize_memory_usage
 
         self.observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=observation_space.dtype)
@@ -214,6 +207,11 @@ class ReplayBuffer(BaseBuffer):
         if not optimize_memory_usage:
             # When optimizing memory, `observations` contains also the next observation
             self.next_observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=observation_space.dtype)
+        elif handle_timeout_termination:
+            # keep track of the last state of an episode in case of a timeout
+            # the states will be stored in a dictionary keyed by the position in the buffer
+            self.last_states = dict()
+
 
         self.actions = np.zeros(
             (self.buffer_size, self.n_envs, self.action_dim), dtype=self._maybe_cast_dtype(action_space.dtype)
@@ -276,6 +274,17 @@ class ReplayBuffer(BaseBuffer):
         if self.handle_timeout_termination:
             self.timeouts[self.pos] = np.array([info.get("TimeLimit.truncated", False) for info in infos])
 
+            if self.optimize_memory_usage:
+                # if an episode ended due to timeout, we need to store the next_observation seperately
+                # (it will get overwritten the next time add() is called)
+                if self.pos in self.last_states:
+                    # remove states from old transitions
+                    del self.last_states[self.pos]
+
+                # add states from new transitions that ended due to timeout
+                if np.any(self.timeouts[self.pos] == True):
+                    self.last_states[self.pos] = np.array(next_obs)
+
         self.pos += 1
         if self.pos == self.buffer_size:
             self.full = True
@@ -309,6 +318,20 @@ class ReplayBuffer(BaseBuffer):
 
         if self.optimize_memory_usage:
             next_obs = self._normalize_obs(self.observations[(batch_inds + 1) % self.buffer_size, env_indices, :], env)
+
+            if self.handle_timeout_termination:
+                # for those transitions that were timeouts, replace the next_obs with the correct last observations
+                inds_of_timeouts = np.where(self.timeouts[batch_inds, env_indices] == True)[0]
+                if len(inds_of_timeouts) > 0:
+                    next_obs[inds_of_timeouts] = self._normalize_obs(
+                        np.array(
+                            [
+                                self.last_states[b][e]
+                                for b, e in zip(batch_inds[inds_of_timeouts], env_indices[inds_of_timeouts])
+                            ]
+                        ),
+                        env,
+                    )
         else:
             next_obs = self._normalize_obs(self.next_observations[batch_inds, env_indices, :], env)
 
