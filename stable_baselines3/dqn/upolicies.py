@@ -22,6 +22,7 @@ class UncertaintyMlpPolicy(DQNPolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        use_amp: bool = False,
     ):
         super().__init__(
             observation_space,
@@ -34,6 +35,7 @@ class UncertaintyMlpPolicy(DQNPolicy):
             normalize_images=normalize_images,
             optimizer_class=optimizer_class,
             optimizer_kwargs=optimizer_kwargs,
+            use_amp=use_amp,
         )
 
         self.u_net, self.u_net_target = None, None

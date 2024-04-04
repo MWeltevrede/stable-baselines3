@@ -83,6 +83,7 @@ class UncertaintyDQN(DQN):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        use_amp: bool = False,
     ):
         super().__init__(
             policy=policy,
@@ -110,8 +111,11 @@ class UncertaintyDQN(DQN):
             seed=seed,
             device=device,
             _init_setup_model=_init_setup_model,
+            use_amp=use_amp,
         )
         self.beta = beta
+
+        self.u_scaler = th.cuda.amp.GradScaler(enabled=self.use_amp)
 
 
     def _create_aliases(self) -> None:
@@ -144,65 +148,73 @@ class UncertaintyDQN(DQN):
             # Sample replay buffer
             replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
 
-            with th.no_grad():
-                # Compute the next Q-values using the target network
-                next_q_values = self.q_net_target(replay_data.next_observations)
-                if self.double_q:
-                    # Compute the next Q-values using the current network
-                    next_q_values_current = self.q_net(replay_data.next_observations)
-                    next_u_values_current = self.u_net(replay_data.next_observations)
-                    # Determine argmax based on the current network values
-                    actions = (next_q_values_current + self.beta * next_u_values_current).max(dim=1)[1].unsqueeze(dim=1)
-                    next_q_values = next_q_values.gather(dim=1, index=actions)
-                else:
-                    next_u_values = self.u_net_target(replay_data.next_observations)
-                    actions = (next_q_values + self.beta * next_u_values).max(dim=1)[1].unsqueeze(dim=1)
-                    next_q_values = next_q_values.gather(dim=1, index=actions)
+            with th.autocast(device_type=self.device.type, dtype=th.float16, enabled=self.use_amp):
+                with th.no_grad():
+                    # Compute the next Q-values using the target network
+                    next_q_values = self.q_net_target(replay_data.next_observations)
+                    if self.double_q:
+                        # Compute the next Q-values using the current network
+                        next_q_values_current = self.q_net(replay_data.next_observations)
+                        next_u_values_current = self.u_net(replay_data.next_observations)
+                        # Determine argmax based on the current network values
+                        actions = (next_q_values_current + self.beta * next_u_values_current).max(dim=1)[1].unsqueeze(dim=1)
+                        next_q_values = next_q_values.gather(dim=1, index=actions)
+                    else:
+                        next_u_values = self.u_net_target(replay_data.next_observations)
+                        actions = (next_q_values + self.beta * next_u_values).max(dim=1)[1].unsqueeze(dim=1)
+                        next_q_values = next_q_values.gather(dim=1, index=actions)
 
-                # 1-step TD target
-                target_q_values = replay_data.rewards[0] + (1 - replay_data.dones) * self.gamma * next_q_values
+                    # 1-step TD target
+                    target_q_values = replay_data.rewards[0] + (1 - replay_data.dones) * self.gamma * next_q_values
 
-            # Get current Q-values estimates
-            current_q_values = self.q_net(replay_data.observations)
+            with th.autocast(device_type=self.device.type, dtype=th.float16, enabled=self.use_amp):
+                # Get current Q-values estimates
+                current_q_values = self.q_net(replay_data.observations)
 
-            # Retrieve the q-values for the actions from the replay buffer
-            current_q_values = th.gather(current_q_values, dim=1, index=replay_data.actions.long())
+                # Retrieve the q-values for the actions from the replay buffer
+                current_q_values = th.gather(current_q_values, dim=1, index=replay_data.actions.long())
 
-            # Compute Huber loss (less sensitive to outliers)
-            loss = F.smooth_l1_loss(current_q_values, target_q_values)
+                # Compute Huber loss (less sensitive to outliers)
+                loss = F.smooth_l1_loss(current_q_values, target_q_values)
 
             # Optimize the policy
             self.policy.optimizer.zero_grad()
-            loss.backward()
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.policy.optimizer)
             # Clip gradient norm
             th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-            self.policy.optimizer.step()
+            self.scaler.step(self.policy.optimizer)
+            self.scaler.update()
 
-            with th.no_grad():
-                # Compute the next uncertainties using the target network
-                next_u_values = self.u_net_target(replay_data.next_observations)
-                if self.double_q:
-                    next_u_values = next_u_values.gather(dim=1, index=actions)
-                else:
-                    next_u_values = next_u_values.gather(dim=1, index=actions)
-                # 1-step TD target
-                target_u_values = replay_data.rewards[1] + (1 - replay_data.dones) * self.gamma * next_u_values
+            with th.autocast(device_type=self.device.type, dtype=th.float16, enabled=self.use_amp):
+                with th.no_grad():
+                    # Compute the next uncertainties using the target network
+                    next_u_values = self.u_net_target(replay_data.next_observations)
+                    if self.double_q:
+                        next_u_values = next_u_values.gather(dim=1, index=actions)
+                    else:
+                        next_u_values = next_u_values.gather(dim=1, index=actions)
+                    # 1-step TD target
+                    target_u_values = replay_data.rewards[1] + (1 - replay_data.dones) * self.gamma * next_u_values
 
-            # Get current uncertainty estimates
-            current_u_values = self.u_net(replay_data.observations)
+            with th.autocast(device_type=self.device.type, dtype=th.float16, enabled=self.use_amp):
+                # Get current uncertainty estimates
+                current_u_values = self.u_net(replay_data.observations)
 
-            # Retrieve the uncertainties for the actions from the replay buffer
-            current_u_values = th.gather(current_u_values, dim=1, index=replay_data.actions.long())
+                # Retrieve the uncertainties for the actions from the replay buffer
+                current_u_values = th.gather(current_u_values, dim=1, index=replay_data.actions.long())
 
-            # Compute Huber loss (less sensitive to outliers)
-            u_loss = F.smooth_l1_loss(current_u_values, target_u_values)
+                # Compute Huber loss (less sensitive to outliers)
+                u_loss = F.smooth_l1_loss(current_u_values, target_u_values)
 
             # Optimize the policy
             self.policy.u_optimizer.zero_grad()
-            u_loss.backward()
+            self.u_scaler.scale(u_loss).backward()
+            self.u_scaler.unscale_(self.policy.u_optimizer)
             # Clip gradient norm
             th.nn.utils.clip_grad_norm_(self.policy.u_net.parameters(), self.max_grad_norm)
-            self.policy.u_optimizer.step()
+            self.u_scaler.step(self.policy.u_optimizer)
+            self.u_scaler.update()
 
             losses.append(loss.item())
             u_losses.append(u_loss.item())
