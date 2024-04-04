@@ -57,8 +57,11 @@ class UncertaintyMlpPolicy(DQNPolicy):
         return q_values + self.beta * uncertainties
 
     def _predict(self, obs: th.Tensor, deterministic: bool = True) -> th.Tensor:
-        ##### TODO: Change behaviour so that if deterministic is True, it only uses Q not U
-        values = self(obs)
+        if deterministic:
+            # use only Q, not U
+            values = self.q_net(obs)
+        else:
+            values = self(obs)
         # Greedy action
         action = values.argmax(dim=1).reshape(-1)
         return action
