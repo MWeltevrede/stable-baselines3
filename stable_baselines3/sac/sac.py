@@ -92,12 +92,15 @@ class SAC(OffPolicyAlgorithm):
         policy: Union[str, Type[SACPolicy]],
         env: Union[GymEnv, str],
         learning_rate: Union[float, Schedule] = 3e-4,
+        learning_rate_alpha: Union[float, Schedule] = 3e-4,
         buffer_size: int = 1_000_000,  # 1e6
         learning_starts: int = 100,
         batch_size: int = 256,
-        tau: float = 0.005,
+        tau: float = 0.01,
+        encoder_tau: float = 0.05,
         gamma: float = 0.99,
         train_freq: Union[int, Tuple[int, str]] = 1,
+        actor_delay: Union[int, Tuple[int, str]] = 2,
         gradient_steps: int = 1,
         action_noise: Optional[ActionNoise] = None,
         replay_buffer_class: Optional[Type[ReplayBuffer]] = None,
@@ -152,6 +155,10 @@ class SAC(OffPolicyAlgorithm):
         self.ent_coef = ent_coef
         self.target_update_interval = target_update_interval
         self.ent_coef_optimizer: Optional[th.optim.Adam] = None
+        self.learning_rate_alpha = learning_rate_alpha
+        self.encoder_tau = encoder_tau
+        self.actor_delay = actor_delay
+        self.delay_counter = 0
 
         if _init_setup_model:
             self._setup_model()
@@ -184,7 +191,7 @@ class SAC(OffPolicyAlgorithm):
             # Note: we optimize the log of the entropy coeff which is slightly different from the paper
             # as discussed in https://github.com/rail-berkeley/softlearning/issues/37
             self.log_ent_coef = th.log(th.ones(1, device=self.device) * init_value).requires_grad_(True)
-            self.ent_coef_optimizer = th.optim.Adam([self.log_ent_coef], lr=self.lr_schedule(1))
+            self.ent_coef_optimizer = th.optim.Adam([self.log_ent_coef], lr=self.learning_rate_alpha)
         else:
             # Force conversion to float
             # this will throw an error if a malformed string (different from 'auto')
@@ -201,8 +208,8 @@ class SAC(OffPolicyAlgorithm):
         self.policy.set_training_mode(True)
         # Update optimizers learning rate
         optimizers = [self.actor.optimizer, self.critic.optimizer]
-        if self.ent_coef_optimizer is not None:
-            optimizers += [self.ent_coef_optimizer]
+        # if self.ent_coef_optimizer is not None:
+        #     optimizers += [self.ent_coef_optimizer]
 
         # Update learning rate according to lr schedule
         self._update_learning_rate(optimizers)
@@ -235,12 +242,13 @@ class SAC(OffPolicyAlgorithm):
 
             ent_coefs.append(ent_coef.item())
 
-            # Optimize entropy coefficient, also called
-            # entropy temperature or alpha in the paper
-            if ent_coef_loss is not None and self.ent_coef_optimizer is not None:
-                self.ent_coef_optimizer.zero_grad()
-                ent_coef_loss.backward()
-                self.ent_coef_optimizer.step()
+            if self.delay_counter % self.actor_delay == 0:
+                # Optimize entropy coefficient, also called
+                # entropy temperature or alpha in the paper
+                if ent_coef_loss is not None and self.ent_coef_optimizer is not None:
+                    self.ent_coef_optimizer.zero_grad()
+                    ent_coef_loss.backward()
+                    self.ent_coef_optimizer.step()
 
             with th.no_grad():
                 # Select action according to policy
@@ -267,22 +275,26 @@ class SAC(OffPolicyAlgorithm):
             critic_loss.backward()
             self.critic.optimizer.step()
 
-            # Compute actor loss
-            # Alternative: actor_loss = th.mean(log_prob - qf1_pi)
-            # Min over all critic networks
-            q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
-            min_qf_pi, _ = th.min(q_values_pi, dim=1, keepdim=True)
-            actor_loss = (ent_coef * log_prob - min_qf_pi).mean()
-            actor_losses.append(actor_loss.item())
+            if self.delay_counter % self.actor_delay == 0:
+                # Compute actor loss
+                # Alternative: actor_loss = th.mean(log_prob - qf1_pi)
+                # Min over all critic networks
+                q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
+                min_qf_pi, _ = th.min(q_values_pi, dim=1, keepdim=True)
+                actor_loss = (ent_coef * log_prob - min_qf_pi).mean()
+                actor_losses.append(actor_loss.item())
 
-            # Optimize the actor
-            self.actor.optimizer.zero_grad()
-            actor_loss.backward()
-            self.actor.optimizer.step()
+                # Optimize the actor
+                self.actor.optimizer.zero_grad()
+                actor_loss.backward()
+                self.actor.optimizer.step()
 
             # Update target networks
             if gradient_step % self.target_update_interval == 0:
-                polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.tau)
+                # polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.tau)
+                polyak_update(self.critic.features_extractor.parameters(), self.critic_target.features_extractor.parameters(), self.encoder_tau)
+                for i in range(self.critic.n_critics):
+                    polyak_update(self.critic.q_networks[i].parameters(), self.critic_target.q_networks[i].parameters(), self.tau)
                 # Copy running stats, see GH issue #996
                 polyak_update(self.batch_norm_stats, self.batch_norm_stats_target, 1.0)
 
@@ -294,6 +306,8 @@ class SAC(OffPolicyAlgorithm):
         self.logger.record("train/critic_loss", np.mean(critic_losses))
         if len(ent_coef_losses) > 0:
             self.logger.record("train/ent_coef_loss", np.mean(ent_coef_losses))
+
+        self.delay_counter += 1
 
     def learn(
         self: SelfSAC,

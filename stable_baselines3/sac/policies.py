@@ -19,7 +19,7 @@ from stable_baselines3.common.type_aliases import PyTorchObs, Schedule
 
 # CAP the standard deviation of the actor
 LOG_STD_MAX = 2
-LOG_STD_MIN = -20
+LOG_STD_MIN = -10
 
 
 class Actor(BasePolicy):
@@ -160,8 +160,12 @@ class Actor(BasePolicy):
             return mean_actions, self.log_std, dict(latent_sde=latent_pi)
         # Unstructured exploration (Original implementation)
         log_std = self.log_std(latent_pi)  # type: ignore[operator]
+        log_std = th.tanh(log_std)
+        log_std = LOG_STD_MIN + 0.5 * (
+                LOG_STD_MAX - LOG_STD_MIN
+            ) * (log_std + 1)
         # Original Implementation to cap the standard deviation
-        log_std = th.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
+        # log_std = th.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
         return mean_actions, log_std, {}
 
     def forward(self, obs: PyTorchObs, deterministic: bool = False) -> th.Tensor:
