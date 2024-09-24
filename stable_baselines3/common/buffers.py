@@ -1,6 +1,7 @@
 import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Generator, List, Optional, Tuple, Union
+import queue
 
 import numpy as np
 import torch as th
@@ -338,6 +339,102 @@ class ReplayBuffer(BaseBuffer):
             return np.float32
         return dtype
 
+class ExploreGoReplayBuffer(ReplayBuffer):
+    """
+    Replay buffer used in off-policy algorithms like SAC/TD3.
+
+    :param buffer_size: Max number of element in the buffer
+    :param observation_space: Observation space
+    :param action_space: Action space
+    :param device: PyTorch device
+    :param n_envs: Number of parallel environments
+    :param optimize_memory_usage: Enable a memory efficient variant
+        of the replay buffer which reduces by almost a factor two the memory used,
+        at a cost of more complexity.
+        See https://github.com/DLR-RM/stable-baselines3/issues/37#issuecomment-637501195
+        and https://github.com/DLR-RM/stable-baselines3/pull/28#issuecomment-637559274
+        Cannot be used in combination with handle_timeout_termination.
+    :param handle_timeout_termination: Handle timeout termination (due to timelimit)
+        separately and treat the task as infinite horizon task.
+        https://github.com/DLR-RM/stable-baselines3/issues/284
+    """
+
+    observations: np.ndarray
+    next_observations: np.ndarray
+    actions: np.ndarray
+    rewards: np.ndarray
+    dones: np.ndarray
+    timeouts: np.ndarray
+
+    def __init__(
+        self,
+        buffer_size: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        device: Union[th.device, str] = "auto",
+        n_envs: int = 1,
+        optimize_memory_usage: bool = False,
+        handle_timeout_termination: bool = True,
+        include_pure_experience: bool = False,
+    ):
+        assert optimize_memory_usage == False, "Optimize_memory_usage has to be False."
+        super().__init__(
+            buffer_size, 
+            observation_space, 
+            action_space, 
+            device, 
+            n_envs=n_envs, 
+            optimize_memory_usage=optimize_memory_usage, 
+            handle_timeout_termination=handle_timeout_termination)
+        
+        self.experience_queue = queue.Queue()
+        self.include_pure_experience = include_pure_experience
+
+    def add(
+        self,
+        obs: np.ndarray,
+        next_obs: np.ndarray,
+        action: np.ndarray,
+        reward: np.ndarray,
+        done: np.ndarray,
+        infos: List[Dict[str, Any]],
+        normal_inds: np.ndarray,
+    ) -> None:
+        if self.include_pure_experience:
+              super().add(obs, next_obs, action, reward, done, infos)
+        else:
+            for i in range(obs.shape[0]):
+                # First add normal (non-pure) experience to the experience queue
+                if normal_inds[i] == True:
+                    experience_tuple = (obs[i], next_obs[i], action[i], reward[i], done[i], infos[i])
+                    self.experience_queue.put(experience_tuple)
+
+            # Add experience to the buffer once enough has been collected
+            if self.experience_queue.qsize() >= self.n_envs:
+                obs_list = []
+                next_obs_list = []
+                action_list = []
+                reward_list = []
+                done_list = []
+                infos_list = []
+                for _ in range(self.n_envs):
+                    experience_tuple = self.experience_queue.get()
+                    obs_list.append(experience_tuple[0])
+                    next_obs_list.append(experience_tuple[1])
+                    action_list.append(experience_tuple[2])
+                    reward_list.append(experience_tuple[3])
+                    done_list.append(experience_tuple[4])
+                    infos_list.append(experience_tuple[5])
+                obs_list = np.stack(obs_list, axis=0)
+                next_obs_list = np.stack(next_obs_list, axis=0)
+                action_list = np.stack(action_list, axis=0)
+                reward_list = np.stack(reward_list, axis=0)
+                done_list = np.stack(done_list, axis=0)
+
+                super().add(obs_list, next_obs_list, action_list, reward_list, done_list, infos_list)
+              
+
+    
 
 class RolloutBuffer(BaseBuffer):
     """
