@@ -679,3 +679,16 @@ class ExploreGoOnPolicyAlgorithm(BaseAlgorithm):
         state_dicts = ["policy", "policy.optimizer"]
 
         return state_dicts, []
+    
+    def _excluded_save_params(self) -> List[str]:
+        """
+        Returns the names of the parameters that should be excluded from being
+        saved by pickling. E.g. replay buffers are skipped by default
+        as they take up a lot of space. PyTorch variables should be excluded
+        with this so they can be stored with ``th.save``.
+
+        :return: List of parameters that should be excluded from being saved with pickle.
+        """
+        exclude_list = super()._excluded_save_params()
+        exclude_list.append("tmp_rollout_buffer")
+        return exclude_list
