@@ -360,6 +360,7 @@ class ExploreGoDQN(ExploreGoOffPolicyAlgorithm):
         exploration_fraction: float = 0.1,
         exploration_initial_eps: float = 1.0,
         exploration_final_eps: float = 0.05,
+        fixed_exploration_coeff: Optional[float] = None,
         max_grad_norm: float = 10,
         stats_window_size: int = 100,
         tensorboard_log: Optional[str] = None,
@@ -407,6 +408,10 @@ class ExploreGoDQN(ExploreGoOffPolicyAlgorithm):
         self.max_grad_norm = max_grad_norm
         # "epsilon" for the epsilon-greedy exploration
         self.exploration_rate = 0.0
+
+        self.fixed_exploration= np.array([])
+        if fixed_exploration_coeff is not None:
+            self.fixed_exploration = np.power(np.linspace(0.0, 1.0, num=self.n_envs), fixed_exploration_coeff)
 
         if _init_setup_model:
             self._setup_model()
@@ -523,7 +528,22 @@ class ExploreGoDQN(ExploreGoOffPolicyAlgorithm):
         :return: the model's action and the next state
             (used in recurrent policies)
         """
-        if not deterministic and np.random.rand() < self.exploration_rate:
+        if not deterministic and len(self.fixed_exploration) > 0:
+            non_random_inds = np.random.rand(len(self.fixed_exploration)) >= self.fixed_exploration
+            if self.policy.is_vectorized_observation(observation):
+                if isinstance(observation, dict):
+                    n_batch = observation[next(iter(observation.keys()))].shape[0]
+                else:
+                    n_batch = observation.shape[0]
+                action = np.array([self.action_space.sample() for _ in range(n_batch)])
+            else:
+                action = np.array(self.action_space.sample())
+
+            greedy_action, greedy_state = self.policy.predict(observation, state, episode_start, deterministic)
+            action[non_random_inds] = greedy_action[non_random_inds]
+            if state:
+                state[non_random_inds] = greedy_state[non_random_inds]
+        elif not deterministic and np.random.rand() < self.exploration_rate:
             if self.policy.is_vectorized_observation(observation):
                 if isinstance(observation, dict):
                     n_batch = observation[next(iter(observation.keys()))].shape[0]
