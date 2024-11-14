@@ -591,6 +591,13 @@ class ExploreGoOnPolicyAlgorithm(BaseAlgorithm):
                     self.episode_steps[idx] = 0
                     self.num_pure_expl_steps[idx] = np.random.randint(0, self.max_pure_expl_steps+1)
 
+        # empty the queues since we are about to update the policy,
+        # turning all the current experience in the queue off-policy
+        steps_thrown_out = sum([q.qsize() for q in self.tmp_rollout_buffer])
+        self.tmp_rollout_buffer = [queue.Queue() for _ in range(self.n_envs)]
+        # don't count the steps we threw out (we only had to throw them out because VecEnv doesn't natively support stepping in a subset of the environments)
+        self.num_timesteps -= steps_thrown_out
+
         with th.no_grad():
             # Compute value for the last timestep
             values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
