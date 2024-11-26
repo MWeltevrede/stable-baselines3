@@ -686,6 +686,7 @@ class ExploreGoOffPolicyAlgorithm(OffPolicyAlgorithm):
         sde_support: bool = True,
         supported_action_spaces: Optional[Tuple[Type[spaces.Space], ...]] = None,
         max_pure_expl_steps: int = 0,
+        num_starting_states: int = 20,
     ):
         super().__init__(
             policy=policy,
@@ -717,7 +718,20 @@ class ExploreGoOffPolicyAlgorithm(OffPolicyAlgorithm):
             supported_action_spaces=supported_action_spaces,
         )
         self.max_pure_expl_steps = max_pure_expl_steps
-        self.num_pure_expl_steps = np.random.randint(0, max_pure_expl_steps+1 , size=env.num_envs)
+
+        # store starting states as a sequence of actions
+        self.starting_states = [([], 0)]
+        self.num_starting_states = num_starting_states
+        if num_starting_states > 0:
+            sequence_lengths = np.linspace(1, self.max_pure_expl_steps, num_starting_states).astype(int)
+            for length in sequence_lengths:
+                action_sequence = []
+                for _ in range(length): 
+                    action_sequence.append(self.env.action_space.sample())
+                self.starting_states.append((action_sequence, length))
+
+        self.starting_state_id = np.random.randint(0, num_starting_states+1 , size=env.num_envs)
+        self.num_pure_expl_steps = [self.starting_states[i][1] for i in self.starting_state_id]
         self.episode_steps = np.zeros(env.num_envs)
         self.num_normal_steps = 0
 
@@ -755,8 +769,13 @@ class ExploreGoOffPolicyAlgorithm(OffPolicyAlgorithm):
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
             assert self._last_obs is not None, "self._last_obs was not set"
             normal_inds = self.episode_steps >= self.num_pure_expl_steps
+            pure_inds = self.episode_steps < self.num_pure_expl_steps
             unscaled_action_normal, _ = self.predict(self._last_obs[normal_inds], deterministic=False)
             unscaled_action = np.array([self.action_space.sample() for _ in range(n_envs)])
+            for i, pure in enumerate(pure_inds):
+                if pure:
+                    starting_sequence = self.starting_states[self.starting_state_id[i]][0]
+                    unscaled_action[i] = starting_sequence[int(self.episode_steps[i])]
             unscaled_action[normal_inds] = unscaled_action_normal
             self.num_normal_steps += sum(normal_inds)
 
@@ -860,7 +879,8 @@ class ExploreGoOffPolicyAlgorithm(OffPolicyAlgorithm):
             for idx, done in enumerate(dones):
                 if done:
                     self.episode_steps[idx] = 0
-                    self.num_pure_expl_steps[idx] = np.random.randint(0, self.max_pure_expl_steps+1)
+                    self.starting_state_id[idx] = np.random.randint(0, self.num_starting_states+1)
+                    self.num_pure_expl_steps[idx] = self.starting_states[self.starting_state_id[idx]][1] 
                     
                     # Update stats
                     num_collected_episodes += 1

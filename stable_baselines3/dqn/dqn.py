@@ -370,6 +370,7 @@ class ExploreGoDQN(ExploreGoOffPolicyAlgorithm):
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
         max_pure_expl_steps: int = 0,
+        num_starting_states: int = 20,
         double_q: bool = True,
     ) -> None:
         super().__init__(
@@ -397,6 +398,7 @@ class ExploreGoDQN(ExploreGoOffPolicyAlgorithm):
             supported_action_spaces=(spaces.Discrete,),
             support_multi_env=True,
             max_pure_expl_steps=max_pure_expl_steps,
+            num_starting_states=num_starting_states,
         )
 
         self.exploration_initial_eps = exploration_initial_eps
