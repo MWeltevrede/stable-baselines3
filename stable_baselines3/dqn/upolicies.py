@@ -7,6 +7,7 @@ from torch import nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor
 from stable_baselines3.common.type_aliases import Schedule
 from stable_baselines3.dqn.policies import DQNPolicy
+from stable_baselines3.common.utils import get_schedule_fn
 
 class UncertaintyMlpPolicy(DQNPolicy):
     def __init__(
@@ -15,6 +16,7 @@ class UncertaintyMlpPolicy(DQNPolicy):
         action_space: gym.spaces.Space,
         lr_schedule: Schedule,
         beta: float,
+        u_lr: float,
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
         features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
@@ -37,7 +39,8 @@ class UncertaintyMlpPolicy(DQNPolicy):
         )
 
         self.u_net, self.u_net_target = None, None
-        self._build_unet(lr_schedule)
+        u_lr_schedule = get_schedule_fn(u_lr)
+        self._build_unet(u_lr_schedule)
         self.beta = beta
         self.uncertainty = None
 
