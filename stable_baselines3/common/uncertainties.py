@@ -1,7 +1,6 @@
 import torch as th
 import numpy as np
 from typing import Tuple
-from hirola import HashTable
 from functools import reduce
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -340,76 +339,6 @@ class RNDUncertaintyStateAction:
             rnd = th.clamp(rnd, min=1*th.sqrt(th.as_tensor(self.novelty_rms.var, device=self.device)))
 
         return rnd
-   
-
-class CountUncertainty:
-    '''
-        Implements novelty with counts.
-        Only works with discrete state spaces.
-    '''
-    def __init__(self, total_state_space, obs_shape, device="cpu"):
-        # this will be a dictionary keeping count of states encountered
-        self.state_counts_keys = HashTable(2*total_state_space,  ('u1', reduce(lambda x, y: x*y, obs_shape)), almost_full=(0.8, 3.0))
-        self.state_counts_values = np.zeros(self.state_counts_keys.max, 'u4')
-        self.eps = 1e-7
-        self.device = device
-        self.novelty_rms = RunningMeanStd(shape=())
-        self.max_novelty = 0
-
-    def observe(self, state, update_rms=False):
-        if isinstance(state, th.Tensor):
-            state = state.detach().cpu().numpy()
-        if isinstance(state, np.ndarray):
-            if len(state.shape) == 3:
-                np.expand_dims(state, axis=0)
-        
-        self.state_counts_values[
-            self.state_counts_keys.add(state.reshape(state.shape[0], -1))
-            ] += 1
-
-        if update_rms:
-            self.update_rms(state)
-
-    def update_rms(self, state):
-        if isinstance(state, th.Tensor):
-            state = state.detach().cpu().numpy()
-        if isinstance(state, np.ndarray):
-            if len(state.shape) == 3:
-                np.expand_dims(state, axis=0)
-
-        n = np.array(self.state_counts_values[
-            self.state_counts_keys.get(state.reshape(state.shape[0], -1))
-        ])
-        novelty = 1.0 / np.sqrt(n + self.eps)
-        self.novelty_rms.update(novelty)
-
-
-    def __call__(self, state, binary=False, **kwargs):
-        """Returns the estimated uncertainty for observing a (minibatch of) state(s) ans Tensor.
-        'state' can be either a Tuple, List, 1d Tensor or 2d Tensor (1d Tensors stacked in dim=0).
-        Does not change the counters."""
-        if isinstance(state, th.Tensor):
-            state = state.detach().cpu().numpy()
-        if isinstance(state, np.ndarray):
-            if len(state.shape) == 3:
-                state = np.expand_dims(state, axis=0)
- 
-        n = np.array(self.state_counts_values[
-            self.state_counts_keys.get(state.reshape(state.shape[0], -1))
-        ])
-
-        if binary:
-            novelty = (n == 0)
-        else:
-            novelty = 1.0 / np.sqrt(n + self.eps)
-            if 1.0 / np.sqrt(n.min() + self.eps) > self.max_novelty:
-                self.max_novelty = 1.0 / np.sqrt(n.min() + self.eps)
-            novelty = novelty / self.max_novelty
-            # std = np.sqrt(self.novelty_rms.var + self.eps)
-            # novelty = (novelty - self.novelty_rms.mean) / std
-            # novelty = np.clip(novelty, a_min=2*std, a_max=None)
-
-        return th.as_tensor(novelty, device=th.device(self.device)).float()
     
 
 class CountSAUncertainty:
@@ -507,36 +436,6 @@ class CountSAUncertainty:
 
         return th.as_tensor(novelty, device=th.device(self.device)).float()
     
-
-    
-class EpisodicCountUncertainty():
-    def __init__(self, n_envs, episode_timeout, obs_shape, device="cpu", global_uncertainty=None):
-        self.counters = []
-        for _ in range(n_envs):
-            self.counters.append(CountUncertainty(episode_timeout*2, obs_shape, device=device))
-        self.episode_timeout = episode_timeout
-        self.obs_shape = obs_shape
-        self.device = device
-        self.global_uncertainty = global_uncertainty
-
-    def observe(self, state, done, update_rms=False):
-        novelty = []
-        for i, s in enumerate(state):
-            if done[i]:
-                self.counters[i] = CountUncertainty(self.episode_timeout*2, self.obs_shape, device=self.device)
-            novelty.append(self.counters[i](np.expand_dims(s, axis=0), binary=True))
-            self.counters[i].observe(np.expand_dims(s, axis=0), update_rms=update_rms)
-
-        if self.global_uncertainty is not None:
-            self.global_uncertainty.observe(state, update_rms=update_rms)
-    
-        return th.concatenate(novelty, dim=0).detach().cpu().numpy()
-    
-    def __call__(self, state, **kwargs):
-        if self.global_uncertainty is not None:
-            return self.global_uncertainty(state)
-        else:
-            return th.ones((state.shape[0]), device=self.device).float()
         
 class EpisodicCountSAUncertainty():
     def __init__(self, n_envs, episode_timeout, obs_shape, device="cpu", global_uncertainty=None):
