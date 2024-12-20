@@ -209,11 +209,13 @@ class UncertaintyDQN(DQN):
                     if self.uncertainty is not None:
                         next_u_values = (next_u_values + novelties).gather(dim=1, index=actions)
                         # 1-step TD target
-                        target_u_values = (1 - replay_data.dones) * self.gamma * next_u_values
+                        # target_u_values = (1 - replay_data.dones) * self.gamma * next_u_values
+                        target_u_values = self.gamma * next_u_values
                     else:
                         next_u_values = next_u_values.gather(dim=1, index=actions)
                         # 1-step TD target
-                        target_u_values = replay_data.rewards[1] + (1 - replay_data.dones) * self.gamma * next_u_values
+                        # target_u_values = replay_data.rewards[1] + (1 - replay_data.dones) * self.gamma * next_u_values
+                        target_u_values = replay_data.rewards[1] + self.gamma * next_u_values
                 
 
                 # Get current uncertainty estimates
