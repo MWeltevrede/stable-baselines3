@@ -76,6 +76,8 @@ class UncertaintyDQN(DQN):
         exploration_fraction: float = 0.1,
         exploration_initial_eps: float = 1.0,
         exploration_final_eps: float = 0.05,
+        lam: float = 1,
+        alpha: float = 0,
         max_grad_norm: float = 10,
         tensorboard_log: Optional[str] = None,
         policy_kwargs: Optional[Dict[str, Any]] = None,
@@ -116,6 +118,8 @@ class UncertaintyDQN(DQN):
             device=device,
             _init_setup_model=_init_setup_model,
         )
+
+        self.betas = np.array([beta * lam ** (1 + (k / (self.n_envs-1))*alpha) for k in range(self.n_envs)])
 
 
     def _create_aliases(self) -> None:
@@ -182,7 +186,7 @@ class UncertaintyDQN(DQN):
             self.policy.optimizer.step()
             losses.append(loss.item())
 
-            if not self.beta == 0:
+            if not np.all(self.betas == 0):
                 with th.no_grad():
                     if self.uncertainty is not None:
                         next_obs_shape = replay_data.next_observations.shape

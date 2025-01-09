@@ -17,6 +17,9 @@ class UncertaintyMlpPolicy(DQNPolicy):
         lr_schedule: Schedule,
         beta: float,
         u_lr: float,
+        n_envs: int,
+        lam: float = 1,
+        alpha: float = 0,
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
         features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
@@ -41,7 +44,7 @@ class UncertaintyMlpPolicy(DQNPolicy):
         self.u_net, self.u_net_target = None, None
         u_lr_schedule = get_schedule_fn(u_lr)
         self._build_unet(u_lr_schedule)
-        self.beta = beta
+        self.betas = th.tensor([beta * lam ** (1 + (k / (n_envs-1))*alpha) for k in range(n_envs)])
         self.uncertainty = None
 
     def _set_uncertainty(self, uncertainty):
@@ -56,8 +59,10 @@ class UncertaintyMlpPolicy(DQNPolicy):
         self.u_optimizer = self.optimizer_class(self.u_net.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
 
     def forward(self, obs: th.Tensor) -> th.Tensor:
+        if not self.betas.device == self.device:
+            self.betas = self.betas.to(self.device)
         q_values = self.q_net(obs)
-        if self.beta == 0:
+        if th.all(self.betas == 0):
             return q_values
         else:
             uncertainties = self.u_net(obs)
@@ -78,9 +83,9 @@ class UncertaintyMlpPolicy(DQNPolicy):
                 if no_batch_dim:
                     novelties.squeeze(0)
 
-                return q_values + self.beta * (uncertainties + novelties)
+                return q_values + self.betas.unsqueeze(-1) * (uncertainties + novelties)
             else:
-                return q_values + self.beta * uncertainties
+                return q_values + self.betas.unsqueeze(-1) * uncertainties
 
     def _predict(self, obs: th.Tensor, deterministic: bool = True) -> th.Tensor:
         if deterministic:
