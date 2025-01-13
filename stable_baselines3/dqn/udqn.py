@@ -127,7 +127,10 @@ class UncertaintyDQN(DQN):
             _init_setup_model=_init_setup_model,
         )
 
-        self.betas = np.array([beta * lam ** (1 + (k / (self.n_envs-1))*alpha) for k in range(self.n_envs)])
+        if self.n_envs > 1:
+            self.betas = np.array([beta * lam ** (1 + (k / (self.n_envs-1))*alpha) for k in range(self.n_envs)])
+        else:
+            self.betas = np.array(beta)
         
         self.max_pure_expl_steps = max_pure_expl_steps
         self.num_pure_expl_steps = np.random.randint(0, max_pure_expl_steps+1 , size=env.num_envs)
