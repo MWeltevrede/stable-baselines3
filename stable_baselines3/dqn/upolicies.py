@@ -2,6 +2,8 @@ from typing import Any, Dict, List, Optional, Type
 
 import gymnasium as gym
 import torch as th
+import numpy as np
+from gymnasium import spaces
 from torch import nn
 
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor
@@ -83,9 +85,16 @@ class UncertaintyMlpPolicy(DQNPolicy):
                 if no_batch_dim:
                     novelties.squeeze(0)
 
-                return q_values + self.betas.unsqueeze(-1) * (uncertainties + novelties)
+                # assume that if obs.shape[0] is smaller than self.betas.shape[0], we are in a setting where beta is the same everywhere
+                if obs.shape[0] == self.betas.shape[0]:
+                    return q_values + self.betas.unsqueeze(-1) * (uncertainties + novelties)
+                else:
+                    return q_values + self.betas[0] * (uncertainties + novelties)
             else:
-                return q_values + self.betas.unsqueeze(-1) * uncertainties
+                if obs.shape[0] == self.betas.shape[0]:
+                    return q_values + self.betas.unsqueeze(-1) * uncertainties
+                else:
+                    return q_values + self.betas[0] * uncertainties
 
     def _predict(self, obs: th.Tensor, deterministic: bool = True) -> th.Tensor:
         if deterministic:
@@ -96,3 +105,68 @@ class UncertaintyMlpPolicy(DQNPolicy):
         # Greedy action
         action = values.argmax(dim=1).reshape(-1)
         return action
+    
+    def _predict_pure(self, obs: th.Tensor) -> th.Tensor:
+        # Switch to eval mode (this affects batch norm / dropout)
+        self.set_training_mode(False)
+
+        # Check for common mistake that the user does not mix Gym/VecEnv API
+        # Tuple obs are not supported by SB3, so we can safely do that check
+        if isinstance(obs, tuple) and len(obs) == 2 and isinstance(obs[1], dict):
+            raise ValueError(
+                "You have passed a tuple to the predict() function instead of a Numpy array or a Dict. "
+                "You are probably mixing Gym API with SB3 VecEnv API: `obs, info = env.reset()` (Gym) "
+                "vs `obs = vec_env.reset()` (SB3 VecEnv). "
+                "See related issue https://github.com/DLR-RM/stable-baselines3/issues/1694 "
+                "and documentation for more information: https://stable-baselines3.readthedocs.io/en/master/guide/vec_envs.html#vecenv-api-vs-gym-api"
+            )
+        
+        obs_tensor, vectorized_env = self.obs_to_tensor(obs)
+
+        with th.no_grad():
+            if th.all(self.betas == 0):
+                # use only Q, not U
+                values = self.q_net(obs_tensor)
+            else:
+                uncertainties = self.u_net(obs_tensor)
+                if self.uncertainty is not None:
+                    if len(obs_tensor.shape) == 1 or len(obs_tensor.shape) == 3:
+                        # there is no batch dimension
+                        no_batch_dim = True
+                        # novelties = th.zeros((self.action_space.n), device=obs.device)
+                        obs_tensor = obs_tensor.unsqueeze(0)
+                    else:
+                        no_batch_dim = False
+                    
+                    actions = th.as_tensor(range(self.action_space.n), device=self.device).repeat(obs_tensor.shape[0]).unsqueeze(1)
+                    obs_repeated = th.repeat_interleave(obs_tensor, self.action_space.n, dim=0)
+                    novelties = self.uncertainty(obs_repeated, actions).reshape(obs_tensor.shape[0], uncertainties.shape[-1])
+
+                    if no_batch_dim:
+                        novelties.squeeze(0)
+
+                    values = uncertainties + novelties
+                else:
+                    values = uncertainties
+
+            # Greedy pure exploration action
+            pure_action = values.argmax(dim=1).reshape(-1)
+
+        # Convert to numpy, and reshape to the original action shape
+        pure_action = pure_action.cpu().numpy().reshape((-1, *self.action_space.shape))  # type: ignore[misc, assignment]
+
+        if isinstance(self.action_space, spaces.Box):
+            if self.squash_output:
+                # Rescale to proper domain when using squashing
+                pure_action = self.unscale_action(pure_action)  # type: ignore[assignment, arg-type]
+            else:
+                # Actions could be on arbitrary scale, so clip the actions to avoid
+                # out of bound error (e.g. if sampling from a Gaussian distribution)
+                pure_action = np.clip(pure_action, self.action_space.low, self.action_space.high)  # type: ignore[assignment, arg-type]
+
+        # Remove batch dimension if needed
+        if not vectorized_env:
+            assert isinstance(pure_action, np.ndarray)
+            pure_action = pure_action.squeeze(axis=0)
+
+        return pure_action
