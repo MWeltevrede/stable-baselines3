@@ -211,7 +211,7 @@ class UncertaintyPPO(PPO):
                 intrinsic_rewards = self.uncertainty(self._last_obs, clipped_actions).detach().cpu().numpy()
 
                 if self.pure_exploration:
-                    rewards = intrinsic_rewards
+                    rewards = self.beta * intrinsic_rewards
                 else:
                     rewards += self.beta * intrinsic_rewards
 
