@@ -467,6 +467,9 @@ class EpisodicCountSAUncertainty():
         return th.concatenate(novelty, dim=0).detach().cpu().numpy()
     
     def __call__(self, state, action, global_only=False, **kwargs):
+        if isinstance(state, np.ndarray):
+            state = th.as_tensor(state, device=self.device)
+            action = th.as_tensor(action, device=self.device)
         if self.global_uncertainty is not None:
             bonus =  self.global_uncertainty(state, action)
         else:
