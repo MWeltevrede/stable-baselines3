@@ -446,14 +446,18 @@ class EpisodicCountSAUncertainty():
         self.obs_shape = obs_shape
         self.device = device
         self.global_uncertainty = global_uncertainty
+        self.n_envs = n_envs
 
-    def observe(self, state, action, done, update_rms=False):
+    def observe(self, state, action, done, update_rms=False, indices=None):
+        if indices is None:
+            indices = np.arange(self.n_envs)
+
         novelty = []
         for i, s in enumerate(state):
             if done[i]:
-                self.counters[i] = CountSAUncertainty(self.episode_timeout*2, self.obs_shape, device=self.device)
-            novelty.append(self.counters[i](np.expand_dims(s, axis=0), np.expand_dims(action[i], axis=0), binary=True))
-            self.counters[i].observe(np.expand_dims(s, axis=0), np.expand_dims(action[i], axis=0), update_rms=update_rms)
+                self.counters[indices[i]] = CountSAUncertainty(self.episode_timeout*2, self.obs_shape, device=self.device)
+            novelty.append(self.counters[indices[i]](np.expand_dims(s, axis=0), np.expand_dims(action[i], axis=0), binary=True))
+            self.counters[indices[i]].observe(np.expand_dims(s, axis=0), np.expand_dims(action[i], axis=0), update_rms=update_rms)
 
         if self.global_uncertainty is not None:
             self.global_uncertainty.observe(state, action, update_rms=update_rms)
@@ -466,7 +470,10 @@ class EpisodicCountSAUncertainty():
             novelty.append(self.counters[i](np.expand_dims(s, axis=0), np.expand_dims(action[i], axis=0), binary=True))
         return th.concatenate(novelty, dim=0).detach().cpu().numpy()
     
-    def __call__(self, state, action, global_only=False, **kwargs):
+    def __call__(self, state, action, global_only=False, indices=None, **kwargs):
+        if indices is None:
+            indices = np.arange(self.n_envs)
+
         if isinstance(state, np.ndarray):
             state = th.as_tensor(state, device=self.device)
             action = th.as_tensor(action, device=self.device)
@@ -478,7 +485,7 @@ class EpisodicCountSAUncertainty():
         if not global_only:
             novelty = []
             for i, s in enumerate(state):
-                novelty.append(self.counters[i // 3](s.unsqueeze(0), action[i].unsqueeze(0), binary=True))
+                novelty.append(self.counters[indices[i] // 3](s.unsqueeze(0), action[i].unsqueeze(0), binary=True))
             novelty = th.concatenate(novelty, dim=0)
             bonus = bonus * novelty
         
