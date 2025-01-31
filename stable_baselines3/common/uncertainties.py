@@ -485,7 +485,10 @@ class EpisodicCountSAUncertainty():
         if not global_only:
             novelty = []
             for i, s in enumerate(state):
-                novelty.append(self.counters[indices[i] // 3](s.unsqueeze(0), action[i].unsqueeze(0), binary=True))
+                if state.shape[0] == 3*self.n_envs:
+                    novelty.append(self.counters[indices[i // 3]](s.unsqueeze(0), action[i].unsqueeze(0), binary=True))
+                else:
+                    novelty.append(self.counters[indices[i]](s.unsqueeze(0), action[i].unsqueeze(0), binary=True))
             novelty = th.concatenate(novelty, dim=0)
             bonus = bonus * novelty
         
