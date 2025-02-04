@@ -1,6 +1,7 @@
 import numpy as np
 import torch as th
 import queue
+import random
 
 from typing import Any, Dict, List
 
@@ -139,6 +140,7 @@ class UncertaintyReplayBuffer(ReplayBuffer):
                 self.uncertainty.observe(sampled_batch.next_observations, update_rms=False)
 
         return sampled_batch
+ 
 
 class ExploreGoUncertaintyReplayBuffer(UncertaintyReplayBuffer):
     def __init__(
@@ -231,4 +233,65 @@ class ExploreGoUncertaintyReplayBuffer(UncertaintyReplayBuffer):
                 done_list = np.stack(done_list, axis=0)
 
                 super().skip_add(obs_list, next_obs_list, action_list, reward_list, done_list, infos_list)
+
+
+
+class ExploreGoUncertaintyReplayBufferWithRandom(ExploreGoUncertaintyReplayBuffer):
+    def __init__(
+        self,
+        buffer_size,
+        observation_space,
+        action_space,
+        uncertainty="egreedy",
+        env=None,
+        device="cpu",
+        n_envs=1,
+        optimize_memory_usage=False,
+        handle_timeout_termination=True,
+        state_action_bonus=False,
+        uncertainty_of_sampling=False,  # If false, we calculate epistemic uncertainty in environment collection instead of buffer sampling
+        episodic_discount=False,
+        split_uncertainty=False,
+        include_pure_experience=False,
+        random_fraction=0,
+        random_set = None,
+
+    ):
+        super().__init__(
+            buffer_size, observation_space, action_space, uncertainty, env, device, n_envs, optimize_memory_usage, handle_timeout_termination, state_action_bonus, uncertainty_of_sampling, episodic_discount, split_uncertainty, include_pure_experience
+        )
+        self.random_fraction = random_fraction
+        self.random_set = random_set
+        self.random_states_to_sample = 0
+
+
+    def add(self, obs, next_obs, action, reward, done, infos, normal_inds):
+        super().add(obs, next_obs, action, reward, done, infos, normal_inds)
+
+        self.random_states_to_sample += self.random_fraction*sum(normal_inds)
+
+        if self.random_states_to_sample >= self.n_envs:
+            obs_list = []
+            next_obs_list = []
+            action_list = []
+            reward_list = []
+            done_list = []
+            infos_list = []
+            for _ in range(self.n_envs):
+                experience_tuple = random.choice(self.random_set)
+                obs_list.append(experience_tuple[0])
+                next_obs_list.append(experience_tuple[1])
+                action_list.append(experience_tuple[2])
+                reward_list.append([experience_tuple[3], -1, -1, -1])
+                done_list.append(experience_tuple[4])
+                infos_list.append(experience_tuple[5])
+            obs_list = np.stack(obs_list, axis=0)
+            next_obs_list = np.stack(next_obs_list, axis=0)
+            action_list = np.stack(action_list, axis=0)
+            reward_list = np.stack(reward_list, axis=0)
+            done_list = np.stack(done_list, axis=0)
+
+            super().skip_add(obs_list, next_obs_list, action_list, reward_list, done_list, infos_list)
+
+            self.random_states_to_sample -= self.n_envs
 

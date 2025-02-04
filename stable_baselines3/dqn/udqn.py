@@ -201,19 +201,20 @@ class UncertaintyDQN(DQN):
             self.policy.optimizer.step()
             losses.append(loss.item())
 
-            if not np.all(self.betas == 0):
+            intrinsic_reward_batch_inds = th.as_tensor([~th.all(replay_data.rewards[1:, i] == -1) for i in range(batch_size)], dtype=th.bool, device=self.device)
+            if not np.all(self.betas == 0) and intrinsic_reward_batch_inds.sum() > 0:
                 with th.no_grad():
                     if self.uncertainty is not None:
-                        next_obs_shape = replay_data.next_observations.shape
+                        next_obs_shape = replay_data.next_observations[intrinsic_reward_batch_inds].shape
                         actions = th.as_tensor(range(self.action_space.n), device=self.device).repeat(next_obs_shape[0]).unsqueeze(1)
-                        next_obs_repeated = th.repeat_interleave(replay_data.next_observations, self.action_space.n, dim=0)
-                        novelties = th.concatenate([ir for ir in replay_data.rewards[1:]], dim=-1) * self.uncertainty(next_obs_repeated, actions, global_only=True).reshape(next_obs_shape[0], -1)
+                        next_obs_repeated = th.repeat_interleave(replay_data.next_observations[intrinsic_reward_batch_inds], self.action_space.n, dim=0)
+                        novelties = th.concatenate([ir for ir in replay_data.rewards[1:, intrinsic_reward_batch_inds]], dim=-1) * self.uncertainty(next_obs_repeated, actions, global_only=True).reshape(next_obs_shape[0], -1)
 
                     # Compute the next uncertainties using the target network
-                    next_u_values = self.u_net_target(replay_data.next_observations)
+                    next_u_values = self.u_net_target(replay_data.next_observations[intrinsic_reward_batch_inds])
                     if self.double_q:
                         # Compute the next Q-values using the current network
-                        next_u_values_current = self.u_net(replay_data.next_observations)
+                        next_u_values_current = self.u_net(replay_data.next_observations[intrinsic_reward_batch_inds])
                         # Determine argmax based on the current network values
                         if self.uncertainty is not None:
                             actions = (next_u_values_current + novelties).max(dim=1)[1].unsqueeze(dim=1)
@@ -234,14 +235,14 @@ class UncertaintyDQN(DQN):
                         next_u_values = next_u_values.gather(dim=1, index=actions)
                         # 1-step TD target
                         # target_u_values = replay_data.rewards[1] + (1 - replay_data.dones) * self.gamma * next_u_values
-                        target_u_values = replay_data.rewards[1] + self.gamma * next_u_values
+                        target_u_values = replay_data.rewards[1][intrinsic_reward_batch_inds] + self.gamma * next_u_values
                 
 
                 # Get current uncertainty estimates
-                current_u_values = self.u_net(replay_data.observations)
+                current_u_values = self.u_net(replay_data.observations[intrinsic_reward_batch_inds])
 
                 # Retrieve the uncertainties for the actions from the replay buffer
-                current_u_values = th.gather(current_u_values, dim=1, index=replay_data.actions.long())
+                current_u_values = th.gather(current_u_values, dim=1, index=replay_data.actions[intrinsic_reward_batch_inds].long())
 
                 # Compute Huber loss (less sensitive to outliers)
                 u_loss = F.smooth_l1_loss(current_u_values, target_u_values)
