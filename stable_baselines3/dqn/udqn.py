@@ -306,8 +306,8 @@ class UncertaintyDQN(DQN):
             unscaled_action = self.policy._predict_pure(self._last_obs)
             normal_inds = self.episode_steps >= self.num_pure_expl_steps
             if sum(normal_inds) > 0:
-                unscaled_action_normal, _ = self.predict(self._last_obs[normal_inds], deterministic=False)
-                unscaled_action[normal_inds] = unscaled_action_normal
+                unscaled_action_normal, _ = self.predict(self._last_obs, deterministic=False)
+                unscaled_action[normal_inds] = unscaled_action_normal[normal_inds]
             self.num_normal_steps += sum(normal_inds)
 
         # Rescale the action from [low, high] to [-1, 1]
