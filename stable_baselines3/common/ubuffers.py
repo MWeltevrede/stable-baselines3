@@ -200,7 +200,7 @@ class ExploreGoUncertaintyReplayBuffer(UncertaintyReplayBuffer):
             reward = np.concatenate([np.expand_dims(reward, axis=-1), intrinsic_reward], axis=1)
             
         if self.include_pure_experience:
-              super().add(obs, next_obs, action, reward, done, infos)
+              super().skip_add(obs, next_obs, action, reward, done, infos)
         else:
             for i in range(obs.shape[0]):
                 # First add normal (non-pure) experience to the experience queue
