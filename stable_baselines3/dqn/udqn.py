@@ -384,9 +384,10 @@ class UncertaintyDQN(DQN):
             new_obs, rewards, dones, infos = env.step(actions)
 
             # # If the last step of the pure exploration phase, set done to True
-            # buffer_dones = deepcopy(dones)
-            # last_pure_indices = self.episode_steps == (self.num_pure_expl_steps - 1)
-            # buffer_dones[last_pure_indices] = np.array([True for _ in range(last_pure_indices.sum())])
+            buffer_dones = deepcopy(dones)
+            if self.replay_buffer.include_pure_experience == False:
+                last_pure_indices = self.episode_steps == (self.num_pure_expl_steps - 1)
+                buffer_dones[last_pure_indices] = np.array([True for _ in range(last_pure_indices.sum())])
 
             self.num_timesteps += env.num_envs
             num_collected_steps += 1
@@ -401,7 +402,7 @@ class UncertaintyDQN(DQN):
             self._update_info_buffer(infos, dones)
 
             # Store data in replay buffer (normalized action and unnormalized observation)
-            self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos, normal_inds)  # type: ignore[arg-type]
+            self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, buffer_dones, infos, normal_inds)  # type: ignore[arg-type]
 
             self._update_current_progress_remaining(self.num_timesteps, self._total_timesteps)
 
