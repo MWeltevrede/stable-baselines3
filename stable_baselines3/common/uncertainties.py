@@ -2,6 +2,10 @@ import torch as th
 import numpy as np
 from typing import Tuple
 from functools import reduce
+import hashlib
+
+def get_hash(input):
+    return hashlib.sha256(input).hexdigest()
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     th.nn.init.orthogonal_(layer.weight, std)
@@ -371,7 +375,7 @@ class CountSAUncertainty:
         #     ] += 1
 
         for i, s in enumerate(state):
-            state_action_hash = hash((hash(s.data.tobytes()), hash(action[i].data.tobytes())))
+            state_action_hash = get_hash((get_hash(s.data.tobytes()), get_hash(action[i].data.tobytes())))
             if state_action_hash in self.state_action_counts:
                 self.state_action_counts[state_action_hash] += 1
             else:
@@ -395,7 +399,7 @@ class CountSAUncertainty:
         # ])
         n = np.zeros(len(state))
         for i, s in enumerate(state):
-            state_action_hash = hash((hash(s.data.tobytes()), hash(action[i].data.tobytes())))
+            state_action_hash = get_hash((get_hash(s.data.tobytes()), get_hash(action[i].data.tobytes())))
             n[i] = self.state_action_counts.get(state_action_hash, 0)
 
         novelty = 1.0 / np.sqrt(n + self.eps)
@@ -420,7 +424,7 @@ class CountSAUncertainty:
         # ])
         n = np.zeros(len(state))
         for i, s in enumerate(state):
-            state_action_hash = hash((hash(s.data.tobytes()), hash(action[i].data.tobytes())))
+            state_action_hash = get_hash((get_hash(s.data.tobytes()), get_hash(action[i].data.tobytes())))
             n[i] = self.state_action_counts.get(state_action_hash, 0)
 
         if binary:
