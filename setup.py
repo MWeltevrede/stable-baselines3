@@ -109,7 +109,7 @@ setup(
         "pandas",
         # Plotting learning curves
         "matplotlib",
-        "hirola",
+        # "hirola",
     ],
     extras_require={
         "tests": [
