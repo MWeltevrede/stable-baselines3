@@ -209,8 +209,9 @@ class UncertaintyPPO(PPO):
                     normalise = True
                 else:
                     normalise = False
-                self.uncertainty.observe(self._last_obs, clipped_actions, dones, update_rms=normalise)
+
                 intrinsic_rewards = self.uncertainty(self._last_obs, clipped_actions).detach().cpu().numpy()
+                self.uncertainty.observe(self._last_obs, clipped_actions, dones, update_rms=normalise)
 
                 if self.pure_exploration:
                     rewards = self.beta * intrinsic_rewards
@@ -623,13 +624,13 @@ class ExploreGoPPO(UncertaintyPPO):
             else:
                 normalise = False
             if sum(normal_inds) > 0:
-                self.uncertainty.observe(self._last_obs[normal_inds], clipped_actions[normal_inds], buffer_dones[normal_inds], update_rms=normalise, indices=np.where(normal_inds)[0])
                 intrinsic_rewards = self.uncertainty(self._last_obs[normal_inds], clipped_actions[normal_inds], indices=np.where(normal_inds)[0]).detach().cpu().numpy()
+                self.uncertainty.observe(self._last_obs[normal_inds], clipped_actions[normal_inds], buffer_dones[normal_inds], update_rms=normalise, indices=np.where(normal_inds)[0])
                 rewards[normal_inds] += self.beta * intrinsic_rewards
 
             if sum(pure_inds) > 0:
-                self.pure_agent.uncertainty.observe(self._last_obs[pure_inds], pure_clipped_actions[pure_inds], buffer_dones[pure_inds], update_rms=True, indices=np.where(pure_inds)[0])
                 pure_intrinsic_rewards = self.pure_agent.uncertainty(self._last_obs[pure_inds], pure_clipped_actions[pure_inds], indices=np.where(pure_inds)[0]).detach().cpu().numpy()
+                self.pure_agent.uncertainty.observe(self._last_obs[pure_inds], pure_clipped_actions[pure_inds], buffer_dones[pure_inds], update_rms=True, indices=np.where(pure_inds)[0])
                 rewards[pure_inds] = self.pure_agent.beta * pure_intrinsic_rewards
 
             # Handle timeout by bootstrapping with value function
