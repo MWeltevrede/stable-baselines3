@@ -375,7 +375,7 @@ class CountSAUncertainty:
         #     ] += 1
 
         for i, s in enumerate(state):
-            state_action_hash = get_hash((get_hash(s.data.tobytes()), get_hash(action[i].data.tobytes())))
+            state_action_hash = get_hash(repr((get_hash(s.data.tobytes()), get_hash(action[i].data.tobytes()))).encode())
             if state_action_hash in self.state_action_counts:
                 self.state_action_counts[state_action_hash] += 1
             else:
@@ -399,7 +399,7 @@ class CountSAUncertainty:
         # ])
         n = np.zeros(len(state))
         for i, s in enumerate(state):
-            state_action_hash = get_hash((get_hash(s.data.tobytes()), get_hash(action[i].data.tobytes())))
+            state_action_hash = get_hash(repr((get_hash(s.data.tobytes()), get_hash(action[i].data.tobytes()))).encode())
             n[i] = self.state_action_counts.get(state_action_hash, 0)
 
         novelty = 1.0 / np.sqrt(n + self.eps)
@@ -424,7 +424,7 @@ class CountSAUncertainty:
         # ])
         n = np.zeros(len(state))
         for i, s in enumerate(state):
-            state_action_hash = get_hash((get_hash(s.data.tobytes()), get_hash(action[i].data.tobytes())))
+            state_action_hash = get_hash(repr((get_hash(s.data.tobytes()), get_hash(action[i].data.tobytes()))).encode())
             n[i] = self.state_action_counts.get(state_action_hash, 0)
 
         if binary:
